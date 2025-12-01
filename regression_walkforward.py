@@ -248,16 +248,63 @@ def lasso_regression(X_train_std, X_test_std, y_train, y_test, explained_varianc
 
 
 def elasticnet_regression(X_train_std, X_test_std, y_train, y_test, explained_variance, objected_variance, objected_variance_index):
-    elasticnet = ElasticNet(alpha=1.0, l1_ratio=0.5)
+
+    # --- 修正1: パラメータ範囲の改善 ---
+    param_dist = {
+        "alpha": np.logspace(-4, 2, 100),  # 0.0001 ~ 100 まで広く探索
+        "l1_ratio": np.linspace(0.1, 1.0, 10) # 0を含めると収束警告が出やすいため0.1から推奨
+    }
+
+    # max_iterは探索せず、モデル定義時に固定値として与えるのが定石です
+    MAX_ITER_FIXED = 10000
+
+    n_iter = 30
+    param_list = list(ParameterSampler(param_dist, n_iter=n_iter, random_state=42))
+
+    # --- 修正2: walk_forwardに正しいクラス(ElasticNet)を渡す ---
+    # 注: walk_forward内部でモデルをインスタンス化する際、max_iter=MAX_ITER_FIXED を渡せるように
+    # 実装されている必要があります。もしkwargsを受け取れないなら、ここでの指定方法は工夫が必要です。
+    # ここでは一般的なsklearnのパターンとしてクラスを渡すと仮定します。
+
+    print("Walk-forward optimization start...")
+    # RidgeではなくElasticNetを渡す
+    best_params, best_score = walk_forward(param_list, X_train_std, y_train, ElasticNet)
+
+    print("ウォークフォワード法ベストパラメータ:", best_params)
+    print("ウォークフォワード法平均スコア:", best_score)
+
+    # ベストパラメータの抽出
+    alpha_best = best_params['alpha']
+    l1_ratio_best = best_params['l1_ratio']
+
+    # --- モデルの再学習 ---
+    # max_iterはここで十分な値を指定
+    elasticnet = ElasticNet(alpha=alpha_best, l1_ratio=l1_ratio_best, max_iter=MAX_ITER_FIXED)
     elasticnet.fit(X_train_std, y_train)
+
     y_train_pred = elasticnet.predict(X_train_std)
     y_test_pred = elasticnet.predict(X_test_std)
 
-    print('回帰係数：', elasticnet.coef_[0])
-    print('切片：', elasticnet.intercept_)
-    print('決定係数：', elasticnet.score(X_test_std, y_test))
+    # --- 修正3: 結果表示の適正化 ---
+    print('--- Result ---')
+    print('切片 (Intercept):', elasticnet.intercept_)
+    # 全係数を表示（ベクトルとして表示）
+    print('回帰係数 (Coefficients):\n', elasticnet.coef_)
 
-    plot(X_test_std, y_test, y_test_pred, explained_variance, objected_variance)
+    # ゼロになった係数の数をカウント（スパース性の確認）
+    n_zero = np.sum(elasticnet.coef_ == 0)
+    print(f'係数が0になった変数の数: {n_zero} / {len(elasticnet.coef_)}')
+
+    print('決定係数 (Test R2):', elasticnet.score(X_test_std, y_test))
+
+    MSE = np.mean((y_test - y_test_pred) ** 2)
+    print('平均二乗誤差 (MSE):', MSE)
+    MAE = np.mean(np.abs(y_test - y_test_pred))
+    print('平均絶対誤差 (MAE):', MAE)
+
+    # プロット関数（既存のものを使用）
+    # plot(X_test_std, y_test, y_test_pred, explained_variance, objected_variance)
+
     return y_train_pred, y_test_pred
 
 
